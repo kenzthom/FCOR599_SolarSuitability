@@ -7,13 +7,19 @@ GENERAL INFORMATION
 2. Author Information:
 
  	A. Principle researcher contact information
+  
  		Name: Mackenzie Thomson
+    
  		Institution: University of British Columbia
- 		Email: kenzlyn26@rogers.com
+    
+ 		Email: mackthom26@gmail.com
 
  	B. Co-investigator contact information
+  
  		Name: Connor McGookin
+    
  		Institution: University of British Columbia
+    
  		Email: connor.mcgookin@ubc.ca
 
 3. Project objective: This study will be investigating the photovoltaic potential of BC in order to determine suitable locations for large scale solar farms. Methods will integerate environmental, climactiv, and economic considerations through use of the Analytical Hierarchy Process (AHP).
