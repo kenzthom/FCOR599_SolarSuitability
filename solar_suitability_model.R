@@ -1,5 +1,9 @@
-#FCOR599 Capstone: Site Suitability Analysis for Solar Farms in BC
-#Mackenzie Thomson 
+#######################################################################
+#Project: FCOR599 Capstone Project                                    #
+#Title: Site Suitability Analysis for Utility Scale Solar Farms in BC #
+#Created By: Mackenzie Thomson                                        #
+#Date Created: September 26, 2026                                     #
+#######################################################################
 
 #Packages used:
 library(sf)
@@ -8,10 +12,11 @@ library(terra)
 library(bcmaps)
 library(ggplot2)
 library(AHPtools)
-library(gtools) 
-library(landscapemetrics)
+library(raster)
 library(exactextractr)
 library(tidyverse)
+library(showtext)
+library(tidyterra)
 
 setwd("C:/MGEM/FCOR599/geodatabase/project_working.gdb")
 
@@ -552,7 +557,7 @@ ghi_mask <- mask(ghi_crop, template)
 writeRaster(ghi_mask, "C:/MGEM/FCOR599/geodatabase/second_version/ghi_cleaned.tif", overwrite = TRUE)
 
 #reclassify to 1-5 scale
-m <- c(0, 600, 1,
+m <- c(0, 600, 1, #worst
        600, 800, 2,
        800, 1000, 3,
        1000, 1200, 4,
@@ -569,7 +574,7 @@ writeRaster(ghi_reclass, "C:/MGEM/FCOR599/geodatabase/second_version/ghi_reclass
 roads <- st_read("C:/MGEM/FCOR599/raw_data/vector/DBM_7H_MIL_ROADS_LINE.gdb") 
 
 #reproject first 
-roads_proj <- st_transform(roads, st_crs(template))
+roads_proj <- st_transform(roads, st_crs(final_mask))
 
 #clip
 roads_clip <- st_intersection(roads_proj, bc_albers)
@@ -578,26 +583,25 @@ roads_clip <- st_intersection(roads_proj, bc_albers)
 roads_vect <- vect(roads_clip)
 
 #rastertize using template
-roads_rast <- rasterize(roads_vect, template, field = 1, background = NA)
+roads_rast <- rasterize(roads_vect, final_mask, field = 1, background = NA)
 
 #create continuous distance from roads
 dist_roads <- distance(roads_rast) 
 
 #classify into 5 bins --> rescaled to be linear and wider ranges 
-m <- c(0, 100, NA, #within buffer
-       100, 1000, 5, #best within 100-300m
+m <- c(0, 1000, 5,       #best
        1000, 5000, 4, 
        5000, 15000, 3,
        15000, 30000, 2,
-       30000, Inf, 1)
+       30000, Inf, 1)     #worst
 roads_matrix <- matrix(m, ncol = 3, byrow = TRUE)
 roads_reclass <- terra::classify(dist_roads, roads_matrix, include.lowest = TRUE, right = FALSE)
 
 #mask output
-roads_reclass <- mask(roads_reclass, template) 
+roads_reclass <- mask(roads_reclass, final_mask) 
 
 #export
-writeRaster(roads_reclass, "C:/MGEM/FCOR599/geodatabase/second_version/roads_reclassified.tif", overwrite = TRUE)
+writeRaster(roads_reclass, "C:/MGEM/FCOR599/geodatabase/second_version/preprocessed_v2/roads_reclassified_v2.tif", overwrite = TRUE)
 
 ######Proximity to Cities ----
 
@@ -672,12 +676,12 @@ writeRaster(subs_reclass, "C:/MGEM/FCOR599/geodatabase/second_version/substation
 
 ######ALL RECLASSIFIED SUB CRITERA ----
 
-slope_reclassified <- rast("C:/MGEM/FCOR599/geodatabase/second_version/slope_reclassified.tif")
-aspect_reclassified <- rast("C:/MGEM/FCOR599/geodatabase/second_version/aspect_reclassified.tif")
-ghi_reclassified <- rast("C:/MGEM/FCOR599/geodatabase/second_version/ghi_reclassified.tif")
-roads_reclassified <- rast("C:/MGEM/FCOR599/geodatabase/second_version/roads_reclassified.tif")
-cities_reclassified <- rast("C:/MGEM/FCOR599/geodatabase/second_version/cities_reclassified.tif")
-substations_reclassified <- rast("C:/MGEM/FCOR599/geodatabase/second_version/substations_reclassified.tif") 
+slope_reclassified <- rast("C:/MGEM/FCOR599/geodatabase/second_version/preprocessed/slope_reclassified.tif")
+aspect_reclassified <- rast("C:/MGEM/FCOR599/geodatabase/second_version/preprocessed/aspect_reclassified.tif")
+ghi_reclassified <- rast("C:/MGEM/FCOR599/geodatabase/second_version/preprocessed/ghi_reclassified.tif")
+roads_reclassified <- rast("C:/MGEM/FCOR599/geodatabase/second_version/preprocessed_v2/roads_reclassified_v2.tif")
+cities_reclassified <- rast("C:/MGEM/FCOR599/geodatabase/second_version/preprocessed/cities_reclassified.tif")
+substations_reclassified <- rast("C:/MGEM/FCOR599/geodatabase/second_version/preprocessed/substations_reclassified.tif") 
 
 names(slope_reclassified) <- "Slope"
 names(aspect_reclassified) <- "Aspect"
@@ -695,15 +699,15 @@ datatype(c(slope_reclassified, aspect_reclassified, ghi_reclassified, roads_recl
 #STEP 3########################################
 #AHP ----
 
-criteria <- c("GHI", "Slope", "Aspect", "Roads", "Urban", "Energy")
+criteria <- c("GHI", "Slope", "Aspect", "Roads", "Cities", "Energy")
 
 #use 9-point scale to create top triangle (bottom = recipricals)
 pcm_values <- c(
-  7, 9, 5, 6, 4,  #GHI vs others
-  2, 1, 2, 0.5,   #slope vs others
-  0.6, 1, 1,      #aspect vs others
-  3, 2,           #roads vs others
-  1               #urban vs Energy
+  9, 3, 3, 1, 1,                #GHI 
+  (1/5), (1/3), (1/5), (1/7),   #slope 
+  1, (1/3), (1/3),              #aspect 
+  (1/3), (1/3),                 #roads 
+  1                             #cities 
 )
 
 #build the matrix
@@ -728,6 +732,7 @@ weights_percent <- weights_norm * 100
 sum(weights_norm) #must = 1
 
 AHP_FinalWeights <- as.data.frame(weights_percent, criteria)
+AHP_FinalWeights
 
 #STEP 4########################################
 #Weighted Sum Overlay ----
@@ -737,12 +742,12 @@ AHP_FinalWeights <- as.data.frame(weights_percent, criteria)
 ahp_DecWeights <- as.data.frame(weights_norm, criteria)
 
 #assign normalized weights
-w <- c(GHI = 0.52823720, 
-       slope = 0.10027204,       
-       aspect = 0.06767932,      
-       roads = 0.13615995,       
-       cities = 0.06657271,       
-       energy = 0.10107879)
+w <- c(GHI = 0.26966158, 
+       slope = 0.03273008,       
+       aspect = 0.10063181,      
+       roads = 0.08988719,       
+       cities = 0.24817236,       
+       energy = 0.25891697)
 
 #multiply layer by respective weight, add together (weighted sum)
 suitability_raw <-
@@ -754,14 +759,8 @@ suitability_raw <-
   substations_reclassified * w["energy"]
 
 #suitability across province - gradient 1-5 - not masked
-writeRaster(suitability_raw, "C:/MGEM/FCOR599/geodatabase/second_version/suitability_raw.tif")
-suitability_raw <- rast("C:/MGEM/FCOR599/geodatabase/second_version/suitability_raw.tif")
-
-#suitability across province with masked value - gradient 0-5 - masked = 0
-suitability_masked <- suitability_raw * final_mask
-
-writeRaster(suitability_masked, "C:/MGEM/FCOR599/geodatabase/second_version/suitability_masked.tif")
-suitability_masked <- rast("C:/MGEM/FCOR599/geodatabase/second_version/suitability_masked.tif")
+writeRaster(suitability_raw, "C:/MGEM/FCOR599/geodatabase/second_version/suitabilitySurfaces_v2/suitability_raw.tif", overwrite = TRUE)
+suitability_raw <- rast("C:/MGEM/FCOR599/geodatabase/second_version/suitabilitySurfaces_v2/suitability_raw.tif")
 
 #transform into categorical raster (1-5) using equal intervals
 
@@ -781,21 +780,19 @@ m <- c(breaks[1], breaks[2], 1,
 suit_matrix <- matrix(m, ncol = 3, byrow = TRUE)
 suitability_scaled <- terra::classify(suitability_raw, suit_matrix, include.lowest = TRUE, right = FALSE)
 
-#export...this shows scaled raster weighed from 1-5 with constraints set as 0 (retained)
-writeRaster(suitability_scaled, "C:/MGEM/FCOR599/geodatabase/second_version/FinalSuitability.tif")
+#save scaled 1-5 with no 0 for layer
 
-#create layer with only suitability classes 1-5, set restricted cells to NA (simplify downstream processing)
-suitability_scaled[final_mask == 0] <- NA
+#add mask 
+suitability_scaled[final_mask == 0] <- 0
 
-#export that version to create a version with no 0
-writeRaster(suitability_scaled, "C:/MGEM/FCOR599/geodatabase/second_version/FinalSuitability_NoZero.tif")
+#export final categorical layer
+writeRaster(suitability_scaled, "C:/MGEM/FCOR599/geodatabase/second_version/suitabilitySurfaces_v2/FinalSuitability.tif")
 
 #STEP 5########################################
 #Exploring Results ----
 
 #read in final layers
-suitability_scaled <- rast("C:/MGEM/FCOR599/geodatabase/second_version/FinalSuitability.tif")
-suitability_nz <- rast("C:/MGEM/FCOR599/geodatabase/second_version/FinalSuitability_NoZero.tif")
+suitability_scaled <- rast("C:/MGEM/FCOR599/geodatabase/second_version/suitabilitySurfaces_v2/FinalSuitability.tif")
 
 #BC total area division summary generation:
 
@@ -812,11 +809,11 @@ suitability_summary$area_km2 <- suitability_summary$count * pixel_area_km2
 suitability_summary$acres <- suitability_summary$area_km2 * 247.105 
 
 #add percent of total land each class occupies
-sum(suitability_summary$area_km2) #946975.3 km2
-suitability_summary$percent <- suitability_summary$area_km2 / 948539.3 * 100
+sum(suitability_summary$area_km2) #947010.8 km2
+suitability_summary$percent <- suitability_summary$area_km2 / 947010.8 * 100
 
 #save for later
-write.csv(suitability_summary, "C:/MGEM/FCOR599/geodatabase/second_version/results_summary.csv", row.names = FALSE)
+write.csv(suitability_summary, "C:/MGEM/FCOR599/geodatabase/second_version/zonalStats/results_summary_v2.csv", row.names = FALSE)
 
 #constraints plotting:
 
@@ -851,14 +848,14 @@ plot(final_mask,
 #download ecoprovs sf
 ecoprovs <- ecoprovinces()
 
-#convert to spatvect 
-ecoprovs <- vect(ecoprovs) 
-
 #ensure alignment
-ecoprovs <- project(ecoprovs, template)
+ecoprovs <- project(ecoprovs, final_mask)
+
+#make suitability scaled raster not spat rast
+suitability_rast <- raster(suitability_scaled)
 
 #calculate zonal stats
-zonal_stats <- exact_extract(suitability_nz, ecoprovs, function(values, coverage_fraction) {
+zonal_stats <- exact_extract(suitability_rast, ecoprovs, function(values, coverage_fraction) {
   tbl <- table(factor(values, levels=1:5))       # count each class
   prop <- tbl / sum(tbl)                         # convert to proportion
   return(as.list(prop))
@@ -886,8 +883,7 @@ zonal_df_long <- zonal_df %>%
                values_to = "cell_count")
 
 #convert table counts to area per class per ecoprovince
-cell_area_km2 <- prod(res(suitability_nz)) / 1e6
-zonal_df_long$area_km2 <- zonal_df_long$cell_count * cell_area_km2
+zonal_df_long$area_km2 <- zonal_df_long$cell_count * pixel_area_km2
 
 #calculate proportions
 zonal_df_prop <- zonal_df_long %>%
@@ -907,7 +903,8 @@ zonal_df_prop <- zonal_df_prop %>%
   filter(ecoprovince != "NORTHEAST PACIFIC")
 
 #export as csv
-write.csv(zonal_df_prop, "C:/MGEM/FCOR599/geodatabase/second_version/ZonStats_byEcoprov.csv")
+write.csv(zonal_df_prop, "C:/MGEM/FCOR599/geodatabase/second_version/zonalStats/ZonStats_byEcoprov_v2.csv")
+zonal_df_prop <- read.csv("C:/MGEM/FCOR599/geodatabase/second_version/zonalStats/ZonStats_byEcoprov_v2.csv")
 
 #plot
 class_colors <- c(
@@ -917,19 +914,35 @@ class_colors <- c(
   "4" = "green",      
   "5" = "dark green")
 
+#fix labels for plotting 
+zonal_df_prop$ecoprovince <- tools::toTitleCase(
+  tolower(zonal_df_prop$ecoprovince))
+
+#add constantia font before plotting
+font_add("Constantia", "C:/Windows/Fonts/constan.ttf")
+showtext_auto()
+
 ggplot(zonal_df_prop, aes(fill = factor(class), y = prop, x = ecoprovince)) +
   geom_col(position = "stack") +
   scale_fill_manual(
     values = class_colors, 
     name = "Suitability Class",
-    labels = c("1" = "Not Suitable", "2" = "Low Suitability", "3" = "Moderately Suitable", "4" = "Suitable", "5" = "Very Suitable")) +
-  labs(x = "Ecoprovince", y = "Proportion of Area (km2)", fill = "Suitability Class") +
+    labels = c("1" = "Class 1 - Least Suitable",
+               "2" = "Class 2 - Less Suitability",
+               "3" = "Class 3 - Moderately Suitable",
+               "4" = "Class 4 - Suitable",
+               "5" = "Class 5 - Very Suitable")) +
+  labs(x = "Ecoprovince", 
+       y = expression("Proportion of Area (km"^2*")"), 
+       fill = "Suitability Class") +
+  theme_classic(base_family = "Constantia") +
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
 
 #transform to match excel format 
 zonal_df_wide <- zonal_df_prop %>%
-  pivot_wider(names_from = ecoprovince, values_from = prop) %>%
-  write.csv(zonal_df_wide,  "C:/MGEM/FCOR599/geodatabase/second_version/ZonStats_byEcoprov_wide.csv")
+  pivot_wider(names_from = ecoprovince, values_from = prop)
+
+write.csv(zonal_df_wide,  "C:/MGEM/FCOR599/geodatabase/second_version/zonalStats/ZonStats_byEcoprov_wide_v2.csv")
 
 #STEP 6########################################
 #PVOUT ----
@@ -950,39 +963,65 @@ pvout_clean <- rast("C:/MGEM/FCOR599/geodatabase/second_version/pvout/pvout_clea
 #workflow to identify patches in classes 4 and 5
 
 #isolate each class; now everything other than the cls is NA
-class4 <- suitability_nz
-class4[suitability_nz != 4] <- NA 
-writeRaster(class4, "C:/MGEM/FCOR599/geodatabase/second_version/pvout/suitability_cl4.tif")
+class4 <- suitability_scaled
+class4[suitability_scaled != 4] <- NA 
+writeRaster(class4, "C:/MGEM/FCOR599/geodatabase/second_version/pvout/suitability_cl4.tif", overwrite=TRUE)
 class4 <- rast("C:/MGEM/FCOR599/geodatabase/second_version/pvout/suitability_cl4.tif")
 
-class5 <- suitability_nz
-class5[suitability_nz != 5] <- NA 
-writeRaster(class5, "C:/MGEM/FCOR599/geodatabase/second_version/pvout/suitability_cl5.tif")
+class5 <- suitability_scaled
+class5[suitability_scaled != 5] <- NA 
+writeRaster(class5, "C:/MGEM/FCOR599/geodatabase/second_version/pvout/suitability_cl5.tif", overwrite=TRUE)
 class5 <- rast("C:/MGEM/FCOR599/geodatabase/second_version/pvout/suitability_cl5.tif")
 
-###RASTER TO POLYGON & FILTERING DONE IN ARC###
+#RASTER TO POLYGON CONVERSION DONE IN ARC
 
-#load in cleaned data:
+#read in polygons 
+class4_poly <- st_read("C:/MGEM/FCOR599/geodatabase/second_version/pvout/class_4_polygons.shp")
+class5_poly <- st_read("C:/MGEM/FCOR599/geodatabase/second_version/pvout/class_5_polygons.shp")
 
-#class 4 polygons > 5 acres
-cl4_mmu_poly <- sf::st_read("C:/MGEM/FCOR599/geodatabase/second_version/pvout/class4_polygons.shp")
-#class 5 polygons > 5 acres
-cl5_mmu_poly <- sf::st_read("C:/MGEM/FCOR599/geodatabase/second_version/pvout/class5_polygons.shp")
+#get area and filter to minimum map unit (mmu) of 5 acres
+#divide m2 by 4047 to get acres
+class4_poly$area_acres <- class4_poly$Shape_Area / 4047.85642 
+class4_poly$area_km <- class4_poly$Shape_Area / 1e6
+class4_mmu <- class4_poly[class4_poly$area_acres > 5, ]
 
-#calculate average PVOUT per polygon by masking PVOUT to polygon layer
-#make spatvectors 
-cl4_mmu_vect <- vect(cl4_mmu_poly)
-cl5_mmu_vect <- vect(cl5_mmu_poly)
+class5_poly$area_acres <- class5_poly$Shape_Area / 4047.85642
+class5_poly$area_km <- class5_poly$Shape_Area / 1e6
+class5_mmu <- class5_poly[class5_poly$area_acres > 5, ] 
 
-#mask pvout using polygons
-cl4_pvout <- mask(pvout_clean, cl4_mmu_vect) 
-writeRaster(cl4_pvout, "C:/MGEM/FCOR599/geodatabase/project_working.gdb/cl4_pvout.tif")
+#make spatvectors for processing
+cl4_mmu_vect <- vect(class4_mmu)
+cl5_mmu_vect <- vect(class5_mmu)
 
-#repeat for class 5
-cl5_pvout <- mask(pvout_clean, cl5_mmu_vect)
-writeRaster(cl5_pvout, "C:/MGEM/FCOR599/geodatabase/project_working.gdb/cl5_pvout.tif")
+#Equation 1: Installable Capacity 
+# Ci = Ai x Y 
+# Ai = installable area of polygons
+# Y = representative panel yield - 0.2 used (20% efficiency) 
+# calculate per polygon and then take average 
 
-#count polygons above 10 acres (2MW)
-sum(cl4_mmu_poly$acres > 10, na.rm = TRUE) #increasing mmu to 10 acres = 39206 polygons (from 65,102)
-sum(cl5_mmu_poly$acres > 10, na.rm = TRUE) #increasing mmu to 10 acres = 760 polygons (from 1,656)
+class4_mmu$Ci <- class4_mmu$area_acres * 0.2 
+class5_mmu$Ci <- class5_mmu$area_acres * 0.2 
+mean(class4_mmu$Ci)
+mean(class5_mmu$Ci)
 
+#Equation 2: Annual Energy Production 
+# Ei = Ci x PVOUTi
+# Ci = installable capacity 
+# PVOUTi = mean pvout per polygon 
+# get mean pvout per polygon using zonal stats, then calculate Ei
+
+cl4_pvout_mean <- terra::extract(pvout_clean, cl4_mmu_vect, fun = mean, na.rm = TRUE)
+cl5_pvout_mean <- terra::extract(pvout_clean, cl5_mmu_vect, fun = mean, na.rm = TRUE)
+
+class4_mmu$pvout_mean <- cl4_pvout_mean[,2] #column 2 is mean pvout 
+class5_mmu$pvout_mean <- cl5_pvout_mean[,2]
+
+class4_mmu$Ei <- class4_mmu$Ci * class4_mmu$pvout_mean
+class5_mmu$Ei <- class5_mmu$Ci * class5_mmu$pvout_mean
+
+print(sum(class4_mmu$Ei), digits = 15)
+print(sum(class5_mmu$Ei), digits = 15)
+
+#get average pvout across all polygons 
+mean(class4_mmu$pvout_mean)
+mean(class5_mmu$pvout_mean)
