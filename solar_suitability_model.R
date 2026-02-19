@@ -994,13 +994,14 @@ cl4_mmu_vect <- vect(class4_mmu)
 cl5_mmu_vect <- vect(class5_mmu)
 
 #Equation 1: Installable Capacity 
-# Ci = Ai x Y 
-# Ai = installable area of polygons
+# Ci = Ai x Y x GCR 
+# Ai = installable area of polygons (in m2)
 # Y = representative panel yield - 0.2 used (20% efficiency) 
+# GCR = ground cover ratio - 0.5 used (accounts for fact that 100% of ground isnt solar panels)
 # calculate per polygon and then take average 
 
-class4_mmu$Ci <- class4_mmu$area_acres * 0.2 
-class5_mmu$Ci <- class5_mmu$area_acres * 0.2 
+class4_mmu$Ci <- class4_mmu$Shape_Area * (0.2 * 0.5)
+class5_mmu$Ci <- class5_mmu$Shape_Area * (0.2 * 0.5) 
 mean(class4_mmu$Ci)
 mean(class5_mmu$Ci)
 
